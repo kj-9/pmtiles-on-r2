@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <title>PMTiles on R2 - MapLibre viewer</title>
+    <link
+      href="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.css"
+      rel="stylesheet"
+    />
+    <style>
+      body { margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+      #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+      .controls {
+        position: absolute;
+        z-index: 2;
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 6px;
+        padding: 12px;
+        margin: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        max-width: 360px;
+        line-height: 1.5;
+      }
+      .controls code { background: #f5f5f5; padding: 2px 4px; border-radius: 4px; }
+      .controls input { width: 100%; padding: 6px; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <div class="controls">
+      <strong>PMTiles URL（R2配信URL）</strong>
+      <input id="pmtiles-url" type="text" placeholder="https://example.r2.cloudflarestorage.com/bucket/file.pmtiles" />
+      <button id="load">Load layer</button>
+      <p>
+        PMTilesをR2に公開している場合は上のURLを入力して「Load layer」を押すと表示できます。
+        最初に自動でズームします。<br />
+        R2が署名付きURLを要求する場合は、署名付きURLをそのまま貼り付けてください。
+      </p>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/pmtiles@3.0.5/dist/pmtiles.js"></script>
+    <script>
+      const map = new maplibregl.Map({
+        container: "map",
+        style: {
+          version: 8,
+          sources: {
+            background: { type: "raster", tiles: [
+              "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+            ], tileSize: 256 },
+          },
+          layers: [{ id: "background", type: "raster", source: "background" }],
+        },
+        center: [139.767, 35.681],
+        zoom: 10,
+        maxZoom: 17,
+      });
+
+      const protocol = new pmtiles.Protocol();
+      maplibregl.addProtocol("pmtiles", protocol.tile);
+
+      function loadPmtiles(url) {
+        const sourceId = "pmtiles-layer";
+        const layerId = "pmtiles-raster";
+
+        if (map.getLayer(layerId)) map.removeLayer(layerId);
+        if (map.getSource(sourceId)) map.removeSource(sourceId);
+
+        const pmtilesUrl = `pmtiles://${url}`;
+        const p = new pmtiles.PMTiles(url);
+        protocol.add(p);
+
+        p.getHeader().then((header) => {
+          const bounds = header.bounds;
+          const center = header.center || [
+            (bounds[0] + bounds[2]) / 2,
+            (bounds[1] + bounds[3]) / 2,
+            0,
+          ];
+
+          map.addSource(sourceId, {
+            type: "raster",
+            url: pmtilesUrl,
+            tileSize: 256,
+          });
+          map.addLayer({ id: layerId, type: "raster", source: sourceId, paint: {} });
+
+          if (bounds) {
+            map.fitBounds(
+              [
+                [bounds[0], bounds[1]],
+                [bounds[2], bounds[3]],
+              ],
+              { padding: 40, maxZoom: 17 }
+            );
+          } else if (center) {
+            map.setCenter([center[0], center[1]]);
+            if (center[2]) map.setZoom(center[2]);
+          }
+        });
+      }
+
+      document.getElementById("load").addEventListener("click", () => {
+        const url = document.getElementById("pmtiles-url").value.trim();
+        if (url) loadPmtiles(url);
+      });
+    </script>
+  </body>
+</html>
