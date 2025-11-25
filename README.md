@@ -11,7 +11,7 @@
 ## 使い方
 ### 1. 依存関係
 * bash / curl
-* [pmtiles CLI](https://github.com/protomaps/go-pmtiles)（`scripts/convert_and_upload.sh` 内で `npx -y pmtiles@5.5.0` を自動実行）
+* [pmtiles CLI](https://github.com/protomaps/go-pmtiles)（`scripts/convert_and_upload.sh` 内で `npx -y pmtiles@latest` を自動実行）
 * AWS CLI（R2 は S3 互換のため）
 
 ### 2. 変換 & アップロード

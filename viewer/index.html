@@ -74,11 +74,17 @@
 
         p.getHeader().then((header) => {
           const bounds = header.bounds;
-          const center = header.center || [
-            (bounds[0] + bounds[2]) / 2,
-            (bounds[1] + bounds[3]) / 2,
-            0,
-          ];
+          const center = header.center;
+          const hasBounds = Array.isArray(bounds) && bounds.length === 4;
+          const hasCenter = Array.isArray(center) && center.length >= 2;
+          const fallbackCenter = hasBounds
+            ? [
+                (bounds[0] + bounds[2]) / 2,
+                (bounds[1] + bounds[3]) / 2,
+              ]
+            : map.getCenter().toArray();
+          const targetCenter = hasCenter ? [center[0], center[1]] : fallbackCenter;
+          const targetZoom = hasCenter && center.length >= 3 ? center[2] : map.getZoom();
 
           map.addSource(sourceId, {
             type: "raster",
@@ -87,7 +93,7 @@
           });
           map.addLayer({ id: layerId, type: "raster", source: sourceId, paint: {} });
 
-          if (bounds) {
+          if (hasBounds) {
             map.fitBounds(
               [
                 [bounds[0], bounds[1]],
@@ -95,9 +101,9 @@
               ],
               { padding: 40, maxZoom: 17 }
             );
-          } else if (center) {
-            map.setCenter([center[0], center[1]]);
-            if (center[2]) map.setZoom(center[2]);
+          } else if (targetCenter) {
+            map.setCenter(targetCenter);
+            if (targetZoom) map.setZoom(targetZoom);
           }
         });
       }
