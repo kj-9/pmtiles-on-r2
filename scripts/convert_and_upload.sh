@@ -69,16 +69,14 @@ MBTILES_PATH="$WORKDIR/$(basename "$MBTILES_URL")"
 PMTILES_PATH=${MBTILES_PATH%.mbtiles}.pmtiles
 R2_KEY=${R2_KEY:-$(basename "$PMTILES_PATH")}
 
-if [[ -s "$MBTILES_PATH" ]]; then
-  echo "Found existing MBTiles at $MBTILES_PATH; skipping download."
-else
-  echo "Downloading MBTiles from $MBTILES_URL ..."
-  curl -L "$MBTILES_URL" -o "$MBTILES_PATH"
+echo "Downloading MBTiles from $MBTILES_URL ..."
+# --continue-at - で中断位置からリジューム、失敗時に数回リトライ
+curl -L --continue-at - --retry 5 --retry-delay 5 --retry-connrefused --retry-all-errors \
+  "$MBTILES_URL" -o "$MBTILES_PATH"
 
-  if [[ ! -s "$MBTILES_PATH" ]]; then
-    echo "Download failed or file is empty: $MBTILES_PATH" >&2
-    exit 1
-  fi
+if [[ ! -s "$MBTILES_PATH" ]]; then
+  echo "Download failed or file is empty: $MBTILES_PATH" >&2
+  exit 1
 fi
 
 echo "Installing pmtiles binary..."
