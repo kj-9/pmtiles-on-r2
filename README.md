@@ -37,7 +37,7 @@ raw COG と白抜き済み COG は `/private/tmp` に作る一時ファイルで
 - `curl`
 - GDAL CLI
 - AWS CLI
-- `npx` で実行できる `pmtiles`
+- リポジトリルートの `./pmtiles` CLI
 
 R2 / DVC remote の設定:
 
