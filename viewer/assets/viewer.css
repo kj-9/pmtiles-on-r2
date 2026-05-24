@@ -1,0 +1,146 @@
+body {
+  margin: 0;
+  padding: 0;
+  color: #1f2933;
+  font-family: system-ui, sans-serif;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+#map.checker-background,
+body.checker-mode #map {
+  background-color: #f8fafc;
+  background-image:
+    linear-gradient(45deg, #d8dee9 25%, transparent 25%),
+    linear-gradient(-45deg, #d8dee9 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #d8dee9 75%),
+    linear-gradient(-45deg, transparent 75%, #d8dee9 75%);
+  background-position: 0 0, 0 16px, 16px -16px, -16px 0;
+  background-size: 32px 32px;
+}
+
+.panel {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  left: 12px;
+  width: min(400px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid rgba(31, 41, 51, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 2px 12px rgba(31, 41, 51, 0.16);
+}
+
+.panel h1 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.row {
+  margin-top: 10px;
+}
+
+.row label,
+.label,
+.status {
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.label {
+  margin-bottom: 5px;
+  color: #52616f;
+}
+
+.status {
+  margin-top: 10px;
+  color: #52616f;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.button-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid #8da2b5;
+  border-radius: 5px;
+  background: #f7fafc;
+  color: #1f2933;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+button.active {
+  border-color: #0f766e;
+  background: #d9f3ee;
+  color: #134e4a;
+  font-weight: 700;
+}
+
+input[type="text"],
+input[type="range"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+input[type="text"] {
+  padding: 6px;
+}
+
+.metrics {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(31, 41, 51, 0.14);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.metrics summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.metrics summary + dl {
+  margin-top: 8px;
+}
+
+.metrics dl {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr);
+  gap: 3px 8px;
+  margin: 0;
+}
+
+.metrics dt {
+  color: #52616f;
+}
+
+.metrics dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.help {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}

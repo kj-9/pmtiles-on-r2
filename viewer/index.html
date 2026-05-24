@@ -3,114 +3,296 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
-    <title>PMTiles on R2 - MapLibre viewer</title>
-    <link
-      href="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.css"
-      rel="stylesheet"
-    />
-    <style>
-      body { margin: 0; padding: 0; font-family: system-ui, sans-serif; }
-      #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-      .controls {
-        position: absolute;
-        z-index: 2;
-        background: rgba(255, 255, 255, 0.9);
-        border-radius: 6px;
-        padding: 12px;
-        margin: 12px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-        max-width: 360px;
-        line-height: 1.5;
-      }
-      .controls code { background: #f5f5f5; padding: 2px 4px; border-radius: 4px; }
-      .controls input { width: 100%; padding: 6px; margin-top: 6px; }
-    </style>
+    <title>Kanto PMTiles Viewer</title>
+    <link href="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.css" rel="stylesheet" />
+    <link href="./assets/viewer.css" rel="stylesheet" />
   </head>
   <body>
-    <div class="controls">
-      <strong>PMTiles URL（R2配信URL）</strong>
-      <input id="pmtiles-url" type="text" placeholder="https://example.r2.cloudflarestorage.com/bucket/file.pmtiles" />
-      <button id="load">Load layer</button>
-      <p>
-        PMTilesをR2に公開している場合は上のURLを入力して「Load layer」を押すと表示できます。
-        最初に自動でズームします。<br />
-        R2が署名付きURLを要求する場合は、署名付きURLをそのまま貼り付けてください。
-      </p>
+    <div class="panel">
+      <h1>関東迅速測図 Viewer</h1>
+
+      <div class="row">
+        <span class="label">表示対象</span>
+        <div class="controls">
+          <button class="active" type="button" data-layer-key="pmtiles">生成PMTiles</button>
+          <button type="button" data-layer-key="cog">元COG</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <span class="label">背景</span>
+        <div class="button-row">
+          <button class="active" id="show-osm" type="button">OSM</button>
+          <button id="show-checker" type="button">チェッカー</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label for="opacity">不透明度</label>
+        <input id="opacity" type="range" min="0" max="100" value="100" />
+      </div>
+
+      <div class="status" id="status">生成PMTilesを読み込み中</div>
+
+      <details class="metrics">
+        <summary>診断</summary>
+        <dl>
+          <dt>表示中</dt>
+          <dd id="metric-layer">-</dd>
+          <dt>初回 idle</dt>
+          <dd id="metric-idle">-</dd>
+          <dt>対象リクエスト</dt>
+          <dd id="metric-requests">-</dd>
+          <dt>転送量</dt>
+          <dd id="metric-transfer">-</dd>
+          <dt>Range</dt>
+          <dd id="metric-range">-</dd>
+        </dl>
+      </details>
     </div>
     <div id="map"></div>
 
     <script src="https://unpkg.com/maplibre-gl@3.6.0/dist/maplibre-gl.js"></script>
     <script src="https://unpkg.com/pmtiles@3.0.5/dist/pmtiles.js"></script>
+    <script src="https://unpkg.com/@geomatico/maplibre-cog-protocol@0.8.0/dist/index.js"></script>
+    <script src="./assets/viewer-utils.js"></script>
     <script>
-      const map = new maplibregl.Map({
-        container: "map",
-        style: {
-          version: 8,
-          sources: {
-            background: { type: "raster", tiles: [
-              "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
-            ], tileSize: 256 },
-          },
-          layers: [{ id: "background", type: "raster", source: "background" }],
+      const layerConfig = {
+        pmtiles: {
+          label: "生成PMTiles",
+          kind: "pmtiles",
+          url: "../data/output/kanto/kanto-rapid-webp-q90.pmtiles",
+          filter: "/data/output/kanto/kanto-rapid-webp-q90.pmtiles",
+          sourceId: "kanto-pmtiles-source",
+          layerId: "kanto-pmtiles-layer",
+          tileSize: 512,
+          fitOptions: { padding: 40, maxZoom: 12 },
         },
-        center: [139.767, 35.681],
-        zoom: 10,
+        cog: {
+          label: "元COG",
+          kind: "cog",
+          url: "https://boiledorange73.sakura.ne.jp/data/cog-kanto_rapid-3857.tif",
+          filter: "/data/cog-kanto_rapid-3857.tif",
+          sourceId: "kanto-cog-source",
+          layerId: "kanto-cog-layer",
+          tileSize: 256,
+        },
+      };
+
+      const map = Viewer.createRasterMap({
+        center: [139.75, 35.68],
+        zoom: 8,
         maxZoom: 17,
       });
+      map.addControl(new maplibregl.NavigationControl(), "bottom-right");
 
-      const protocol = new pmtiles.Protocol();
-      maplibregl.addProtocol("pmtiles", protocol.tile);
+      const pmtilesProtocol = Viewer.registerPmtilesProtocol();
+      maplibregl.addProtocol("cog", MaplibreCOGProtocol.cogProtocol);
 
-      function loadPmtiles(url) {
-        const sourceId = "pmtiles-layer";
-        const layerId = "pmtiles-raster";
+      const statusEl = document.getElementById("status");
+      const opacityEl = document.getElementById("opacity");
+      const requestStats = new Map();
+      const loadedLayers = new Set();
+      const originalFetch = window.fetch.bind(window);
+      let activeLayerKey = "pmtiles";
+      let activeStartedAt = 0;
+      let activeMetricTimer = null;
+      let activeFallbackTimer = null;
 
-        if (map.getLayer(layerId)) map.removeLayer(layerId);
-        if (map.getSource(sourceId)) map.removeSource(sourceId);
+      window.fetch = async (input, init) => {
+        const url = typeof input === "string" ? input : input.url;
+        const matchedLayer = Object.values(layerConfig).find((layer) => url.includes(layer.filter));
+        const startedAt = performance.now();
+        const response = await originalFetch(input, init);
 
-        const pmtilesUrl = `pmtiles://${url}`;
-        const p = new pmtiles.PMTiles(url);
-        protocol.add(p);
+        if (matchedLayer) {
+          const stats = requestStats.get(matchedLayer.filter) || {
+            count: 0,
+            transferSize: 0,
+            rangeCount: 0,
+          };
+          const contentLength = Number(response.headers.get("content-length")) || 0;
+          stats.count += 1;
+          stats.transferSize += contentLength;
+          if (response.status === 206 || response.headers.has("content-range")) {
+            stats.rangeCount += 1;
+          }
+          stats.duration = (stats.duration || 0) + performance.now() - startedAt;
+          requestStats.set(matchedLayer.filter, stats);
+        }
 
-        p.getHeader().then((header) => {
-          const bounds = header.bounds;
-          const center = header.center;
-          const hasBounds = Array.isArray(bounds) && bounds.length === 4;
-          const hasCenter = Array.isArray(center) && center.length >= 2;
-          const fallbackCenter = hasBounds
-            ? [
-                (bounds[0] + bounds[2]) / 2,
-                (bounds[1] + bounds[3]) / 2,
-              ]
-            : map.getCenter().toArray();
-          const targetCenter = hasCenter ? [center[0], center[1]] : fallbackCenter;
-          const targetZoom = hasCenter && center.length >= 3 ? center[2] : map.getZoom();
+        return response;
+      };
 
-          map.addSource(sourceId, {
-            type: "raster",
-            url: pmtilesUrl,
-            tileSize: 256,
-          });
-          map.addLayer({ id: layerId, type: "raster", source: sourceId, paint: {} });
+      function setMetric(id, value) {
+        document.getElementById(id).textContent = value;
+      }
 
-          if (hasBounds) {
-            map.fitBounds(
-              [
-                [bounds[0], bounds[1]],
-                [bounds[2], bounds[3]],
-              ],
-              { padding: 40, maxZoom: 17 }
-            );
-          } else if (targetCenter) {
-            map.setCenter(targetCenter);
-            if (targetZoom) map.setZoom(targetZoom);
+      function setStatus(text) {
+        statusEl.textContent = text;
+      }
+
+      function layerOpacity() {
+        return Number(opacityEl.value) / 100;
+      }
+
+      function resetMetrics(layer) {
+        performance.clearResourceTimings();
+        requestStats.set(layer.filter, {
+          count: 0,
+          transferSize: 0,
+          rangeCount: 0,
+        });
+        setMetric("metric-layer", layer.label);
+        setMetric("metric-idle", "読み込み中");
+        setMetric("metric-requests", "-");
+        setMetric("metric-transfer", "-");
+        setMetric("metric-range", "-");
+      }
+
+      function matchingResources(layer) {
+        return performance
+          .getEntriesByType("resource")
+          .filter((entry) => entry.name.includes(layer.filter));
+      }
+
+      function updateMetrics(layer, elapsedMs, statusLabel = "") {
+        const fetchStats = requestStats.get(layer.filter) || {
+          count: 0,
+          transferSize: 0,
+          rangeCount: 0,
+        };
+        const resources = matchingResources(layer);
+        const resourceTransferSize = resources.reduce((sum, entry) => sum + entry.transferSize, 0);
+        const requestCount = fetchStats.count || resources.length;
+        const transferSize = fetchStats.transferSize || resourceTransferSize;
+        const rangeText = fetchStats.count
+          ? `${fetchStats.rangeCount}/${fetchStats.count}`
+          : "DevToolsで確認";
+
+        setMetric("metric-layer", layer.label);
+        setMetric("metric-idle", `${Math.round(elapsedMs)} ms${statusLabel}`);
+        setMetric("metric-requests", `${requestCount}`);
+        setMetric("metric-transfer", Viewer.formatBytes(transferSize));
+        setMetric("metric-range", rangeText);
+      }
+
+      function hideDataLayers() {
+        Object.values(layerConfig).forEach((layer) => {
+          if (map.getLayer(layer.layerId)) {
+            map.setLayoutProperty(layer.layerId, "visibility", "none");
           }
         });
       }
 
-      document.getElementById("load").addEventListener("click", () => {
-        const url = document.getElementById("pmtiles-url").value.trim();
-        if (url) loadPmtiles(url);
+      function updateActiveButtons(key) {
+        document.querySelectorAll("button[data-layer-key]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.layerKey === key);
+        });
+      }
+
+      function clearMetricTimers() {
+        if (activeMetricTimer) window.clearTimeout(activeMetricTimer);
+        if (activeFallbackTimer) window.clearTimeout(activeFallbackTimer);
+      }
+
+      function scheduleMetricUpdates(key, layer) {
+        activeMetricTimer = window.setTimeout(() => {
+          if (activeLayerKey !== key) return;
+          updateMetrics(layer, performance.now() - activeStartedAt);
+        }, 1500);
+
+        activeFallbackTimer = window.setTimeout(() => {
+          if (activeLayerKey !== key) return;
+          updateMetrics(layer, performance.now() - activeStartedAt, "以上");
+        }, 12000);
+
+        map.once("idle", () => {
+          if (activeLayerKey !== key) return;
+          clearMetricTimers();
+          updateMetrics(layer, performance.now() - activeStartedAt);
+        });
+      }
+
+      async function ensureLayer(key) {
+        const layer = layerConfig[key];
+        if (loadedLayers.has(key)) return layer;
+
+        if (layer.kind === "pmtiles") {
+          await Viewer.addPmtilesRasterLayer(map, pmtilesProtocol, {
+            url: layer.url,
+            sourceId: layer.sourceId,
+            layerId: layer.layerId,
+            tileSize: layer.tileSize,
+            paint: { "raster-opacity": layerOpacity() },
+            fitOptions: layer.fitOptions,
+          });
+        } else {
+          map.addSource(layer.sourceId, {
+            type: "raster",
+            url: `cog://${layer.url}`,
+            tileSize: layer.tileSize,
+          });
+          map.addLayer({
+            id: layer.layerId,
+            type: "raster",
+            source: layer.sourceId,
+            paint: { "raster-opacity": layerOpacity() },
+          });
+        }
+
+        loadedLayers.add(key);
+        return layer;
+      }
+
+      async function showLayer(key) {
+        const layer = layerConfig[key];
+        activeLayerKey = key;
+        activeStartedAt = performance.now();
+        clearMetricTimers();
+        resetMetrics(layer);
+        setStatus(`${layer.label}を読み込み中`);
+        updateActiveButtons(key);
+
+        try {
+          await ensureLayer(key);
+          hideDataLayers();
+          map.setLayoutProperty(layer.layerId, "visibility", "visible");
+          map.setPaintProperty(layer.layerId, "raster-opacity", layerOpacity());
+          setStatus(`${layer.label}を表示中`);
+          scheduleMetricUpdates(key, layer);
+        } catch (error) {
+          setStatus(`${layer.label}の読み込み失敗: ${error.message}`);
+          setMetric("metric-idle", "失敗");
+        }
+      }
+
+      document.querySelectorAll("button[data-layer-key]").forEach((button) => {
+        button.addEventListener("click", () => showLayer(button.dataset.layerKey));
+      });
+
+      document.getElementById("show-osm").addEventListener("click", () => {
+        map.setLayoutProperty("osm", "visibility", "visible");
+        document.body.classList.remove("checker-mode");
+        document.getElementById("show-osm").classList.add("active");
+        document.getElementById("show-checker").classList.remove("active");
+      });
+
+      document.getElementById("show-checker").addEventListener("click", () => {
+        map.setLayoutProperty("osm", "visibility", "none");
+        document.body.classList.add("checker-mode");
+        document.getElementById("show-osm").classList.remove("active");
+        document.getElementById("show-checker").classList.add("active");
+      });
+
+      opacityEl.addEventListener("input", () => {
+        const layer = layerConfig[activeLayerKey];
+        if (!map.getLayer(layer.layerId)) return;
+        map.setPaintProperty(layer.layerId, "raster-opacity", layerOpacity());
+      });
+
+      map.once("load", () => {
+        showLayer("pmtiles");
       });
     </script>
   </body>
