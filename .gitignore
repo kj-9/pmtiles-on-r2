@@ -1,6 +1,13 @@
 node_modules
 npm-debug.log
 .env
+.envrc
 .DS_Store
+pmtiles
 
 .wrangler
+.dvc/tmp
+.dvc/cache
+.dvc/config.local
+
+data/
