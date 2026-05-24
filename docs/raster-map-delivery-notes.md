@@ -88,6 +88,47 @@ PMTiles を最終配信形式にする場合、白地問題への対処は主に
 
 白だけ透明化するには、MapLibre の通常の raster layer 設定だけでは難しい。タイル画像そのものを PNG/WebP など透明対応形式で作り直す必要がある。
 
+## DVC と R2 配信用 object の扱い
+
+Kanto の WebP PMTiles は DVC pipeline で生成過程を管理しつつ、R2 上では別アプリケーションから直接読める固定名 object として配信する。
+
+採用した方針:
+
+```text
+COG download / white mask / WebP PMTiles build
+  -> data/output/kanto/kanto-rapid-webp-q90.pmtiles
+  -> R2: pmtiles/kanto-rapid-webp-q90.pmtiles
+```
+
+`dvc push` は DVC cache を remote に送るためのコマンドなので、R2 上の object key は content hash になる。これは DVC の再現性・重複排除には都合がよいが、別アプリケーションが `https://.../pmtiles/kanto-rapid-webp-q90.pmtiles` のような安定 URL として読む用途には向かない。
+
+そのため、配信用 PMTiles は `publish_kanto_pmtiles` stage の中で AWS CLI により固定 key へアップロードし、その R2 object を DVC の外部 output として記録する。
+
+```yaml
+outs:
+  - remote://r2-final/pmtiles/kanto-rapid-webp-q90.pmtiles:
+      cache: false
+```
+
+この設定の意味:
+
+- R2 上の object 名は `pmtiles/kanto-rapid-webp-q90.pmtiles` に固定する
+- DVC は `dvc.lock` に ETag、size、依存ファイル、params を記録する
+- Git では「どの入力とパラメータで、どの配信用 object を作ったか」を追跡できる
+- `.dvc/cache` に 1GB 超の PMTiles を二重保存しない
+- raw COG や白抜き済み COG は一時ファイルとして扱い、DVC output にしない
+
+つまり、この構成でも DVC によるバージョン管理は成立する。ただし DVC の content-addressed cache に成果物を保存する管理ではなく、DVC pipeline と lock file で外部配信用 object の状態を管理する方式になる。
+
+トレードオフ:
+
+- `dvc push` / `dvc pull` だけで成果物を復元する運用ではない
+- 固定 key に上書きアップロードするため、R2 側で過去版を残したい場合は bucket versioning や key に日付・バージョンを含める運用が必要
+- `.dvc/cache` は小さく保てるが、ローカル確認用の最終 PMTiles は `data/output/kanto/` に残る
+- 別アプリケーションは DVC の hash object ではなく、固定 key の PMTiles を読む
+
+このリポジトリでは、配信 URL の安定性とローカル/R2 容量の削減を優先して、この外部 output + `cache: false` の構成にしている。
+
 ## COG という選択肢
 
 COG は Cloud Optimized GeoTIFF の略で、HTTP Range request によって必要な部分だけ読めるように内部構造を最適化した GeoTIFF。

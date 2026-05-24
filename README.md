@@ -3,10 +3,9 @@
 迅速測図（農研機構「歴史的農業環境閲覧システム由来データ」など）の MBTiles を Cloudflare R2 に載せ、MapLibre で参照するまでの手順メモです。
 
 ## セットアップ概要
-1. Web メルカトル（EPSG:3857/900913）で、タイル形式の MBTiles を選ぶ
-   * 例: `https://boiledorange73.sakura.ne.jp/rika/habs/tokyo5000.mbtiles`
-2. `scripts/convert_and_upload.sh` を使って PMTiles に変換し R2 へアップロード
-3. R2 に置いた PMTiles を `viewer/index.html` で開き、MapLibre から閲覧
+1. `kanto` 向け DVC pipeline で、元 COG から白抜き WebP PMTiles を生成
+2. 必要に応じて固定キーの R2 object として公開
+3. `viewer/index.html` で生成 PMTiles と元 COG を確認
 
 ## 使い方
 ### 1. 依存関係
@@ -33,28 +32,18 @@ export AWS_SECRET_ACCESS_KEY=...
 #### 4326 版が必要な場合
 MapLibre で使うだけなら 3857/900913 の MBTiles を選ぶのが安全です。4326 版（例: `tokyo5000-4326.jpg.mbtiles`）を使う場合は、変換後も CRS が 4326 になるので、`viewer/index.html` の背景地図と位置合わせがズレることがあります。必要に応じて背景地図を外すか、Style を 4326 に変更してください。
 
-### 3. MapLibre で確認（ローカル）
-シンプルなビューワーが `viewer/index.html` にあります。
-
-```bash
-# ローカル HTTP サーバーで開く例
-python -m http.server 8080 -d viewer
-```
-
-ブラウザで `http://localhost:8080` を開き、PMTiles の URL（R2 のオブジェクト URL か署名付き URL）を貼り付けて「Load layer」を押すと表示されます。PMTiles のヘッダーに含まれる bbox を使って自動でズームします。
-
-Viewer 共通の見た目と PMTiles 読み込み処理は `viewer/assets/` にまとめています。ページ固有の比較条件や初期URLだけを各 HTML に残す方針です。
-
-### 4. PMTiles / COG 比較（ローカル）
-COG は HTTP Range request が必要なので、Range に対応した静的サーバーでリポジトリ直下を配信します。
+### 3. 関東 PMTiles Viewer で確認（ローカル）
+関東成果物の確認用 Viewer が `viewer/index.html` にあります。生成済みの `data/output/kanto/kanto-rapid-webp-q90.pmtiles` を初期表示し、必要なときだけ元 COG と切り替えて比較できます。
 
 ```bash
 env npm_config_cache=/private/tmp/npm-cache-cog npx --yes http-server . -p 4174 -c-1
 ```
 
-ブラウザで `http://127.0.0.1:4174/viewer/cog-compare.html` を開くと、`data/tokyo5000.pmtiles` とローカルで作成した COG を切り替えて比較できます。
+ブラウザで `http://127.0.0.1:4174/viewer/` を開くと、関東 PMTiles を背景地図またはチェッカーボード上で確認できます。表示対象を `元COG` に切り替えると、`params.yaml` の `kanto.source_url` と同じ COG を直接読み込みます。
 
-### 5. COG から WebP PMTiles を作る
+Viewer 共通の見た目と PMTiles 読み込み処理は `viewer/assets/` にまとめています。Viewer 内の URL 定義は静的な定数なので、`params.yaml` の出力名や COG URL を変えた場合は `viewer/index.html` も更新してください。
+
+### 4. COG から WebP PMTiles を作る
 白マスク済み COG から、透明を保持した WebP PMTiles を作れます。`rio-pmtiles` がない環境では、GDAL の MBTiles WebP 出力を作ってから `pmtiles convert` で PMTiles 化します。
 
 ```bash
@@ -65,7 +54,7 @@ env npm_config_cache=/private/tmp/npm-cache-cog npx --yes http-server . -p 4174 
 
 今回の東京5000検証では、`data/output/tokyo5000-webp-q90.pmtiles` が生成されます。MapLibre 側では `tileSize: 512` を指定してください。
 
-### 6. DVC で kanto パイプラインを管理する
+### 5. DVC で kanto パイプラインを管理する
 `kanto` 向けのパイプラインは DVC で管理します。DVC 自体はローカル常設インストールせず、`uv run --with "dvc[s3]" dvc ...` で実行できます。
 
 白抜き処理は `tokyo5000-white-mask-250-deflate.cog.tif` と同じ方式で、`RGB >= 250` の画素だけ alpha 0 にします。`nearblack` ではなく、RGB値を維持したまま 4 バンド目の alpha だけ差し替えます。
@@ -117,6 +106,8 @@ uv run --with "dvc[s3]" dvc repro publish_kanto_pmtiles
 
 この stage の外部 output は `cache: false` です。R2 上の object 名は固定され、`.dvc/cache` に巨大な二重コピーを作りません。それでも `dvc.lock` には checksum や size が残るため、Git 上では「どの入力・パラメータから、どの固定キーの生成物を作ったか」をバージョン管理できます。
 
+この設計にした背景は [古地図ラスター配信方式の調査メモ](/Users/kh03/work/repos/pmtiles-on-r2/docs/raster-map-delivery-notes.md) の「DVC と R2 配信用 object の扱い」に残しています。
+
 R2 リモート設定:
 
 ```bash
@@ -137,7 +128,7 @@ viewer で透明化を確認する:
 env npm_config_cache=/private/tmp/npm-cache-cog npx --yes http-server . -p 4174 -c-1
 ```
 
-`http://127.0.0.1:4174/viewer/kanto-check.html` を開くと、生成した `data/output/kanto/kanto-rapid-webp-q90.pmtiles` を背景地図またはチェッカーボード上で確認できます。白い余白が残っていれば、背景が隠れて見えます。
+`http://127.0.0.1:4174/viewer/` を開くと、生成した `data/output/kanto/kanto-rapid-webp-q90.pmtiles` を背景地図またはチェッカーボード上で確認できます。白い余白が残っていれば、背景が隠れて見えます。
 
 ## R2 側の設定ポイント
 * バケットは public-read にするか、必要なとき署名付き URL を発行する
