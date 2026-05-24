@@ -1,0 +1,68 @@
+schema: '2.0'
+stages:
+  build_kanto_webp_pmtiles:
+    cmd: 
+      KANTO_SOURCE_URL="https://boiledorange73.sakura.ne.jp/data/cog-kanto_rapid-3857.tif"
+      KANTO_WHITE_THRESHOLD="250" KANTO_COMPRESSION="DEFLATE" 
+      KANTO_WEBP_QUALITY="90" KANTO_TILE_SIZE="512" 
+      KANTO_OUTPUT_NAME="kanto-rapid-webp-q90" 
+      KANTO_OUTPUT_PMTILES="data/output/kanto/kanto-rapid-webp-q90.pmtiles" 
+      ./scripts/build_kanto_webp_pmtiles.sh
+    deps:
+    - path: ./scripts/build_kanto_webp_pmtiles.sh
+      hash: md5
+      md5: 4347e482fa9b10bb3a2907c8c8476241
+      size: 1393
+      isexec: true
+    - path: ./scripts/cog_to_webp_pmtiles.sh
+      hash: md5
+      md5: 0e3ef725b9303e47143d23554f541dcd
+      size: 3307
+      isexec: true
+    - path: ./scripts/download_cog.sh
+      hash: md5
+      md5: 6438bc988f3fca185c7dea563eb38b64
+      size: 512
+      isexec: true
+    - path: ./scripts/mask_white_cog.sh
+      hash: md5
+      md5: 2b88fa0bed0dce339d47493c1282664a
+      size: 2294
+      isexec: true
+    params:
+      params.yaml:
+        kanto.compression: DEFLATE
+        kanto.output_name: kanto-rapid-webp-q90
+        kanto.source_url: 
+          https://boiledorange73.sakura.ne.jp/data/cog-kanto_rapid-3857.tif
+        kanto.tile_size: 512
+        kanto.webp_quality: 90
+        kanto.white_threshold: 250
+    outs:
+    - path: data/output/kanto/kanto-rapid-webp-q90.pmtiles
+      hash: md5
+      md5: 45a7720e298a59804a05988d583e6bfe
+      size: 1231718751
+  publish_kanto_pmtiles:
+    cmd: ./scripts/upload_pmtiles_to_r2.sh 
+      data/output/kanto/kanto-rapid-webp-q90.pmtiles 
+      pmtiles/kanto-rapid-webp-q90.pmtiles
+    deps:
+    - path: ./scripts/upload_pmtiles_to_r2.sh
+      hash: md5
+      md5: f4c64cedd0448644cb6999bafaae866b
+      size: 931
+      isexec: true
+    - path: data/output/kanto/kanto-rapid-webp-q90.pmtiles
+      hash: md5
+      md5: 45a7720e298a59804a05988d583e6bfe
+      size: 1231718751
+    params:
+      params.yaml:
+        kanto.output_name: kanto-rapid-webp-q90
+        kanto.publish_key: pmtiles/kanto-rapid-webp-q90.pmtiles
+    outs:
+    - path: remote://r2-final/pmtiles/kanto-rapid-webp-q90.pmtiles
+      hash: md5
+      etag: ab7c711594134e9afd90d587754b25fd-147
+      size: 1231718751

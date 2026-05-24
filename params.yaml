@@ -1,0 +1,8 @@
+kanto:
+  source_url: https://boiledorange73.sakura.ne.jp/data/cog-kanto_rapid-3857.tif
+  white_threshold: 250
+  compression: DEFLATE
+  webp_quality: 90
+  tile_size: 512
+  output_name: kanto-rapid-webp-q90
+  publish_key: pmtiles/kanto-rapid-webp-q90.pmtiles

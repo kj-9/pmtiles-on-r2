@@ -1,0 +1,6 @@
+[core]
+    no_scm = false
+['remote "r2-final"']
+    url = s3://gis
+    endpointurl = https://7609d129deef48440f584c4179ff0cac.r2.cloudflarestorage.com
+    region = auto

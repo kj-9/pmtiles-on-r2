@@ -1,0 +1,30 @@
+stages:
+  build_kanto_webp_pmtiles:
+    cmd: KANTO_SOURCE_URL="${kanto.source_url}" KANTO_WHITE_THRESHOLD="${kanto.white_threshold}" KANTO_COMPRESSION="${kanto.compression}" KANTO_WEBP_QUALITY="${kanto.webp_quality}" KANTO_TILE_SIZE="${kanto.tile_size}" KANTO_OUTPUT_NAME="${kanto.output_name}" KANTO_OUTPUT_PMTILES="data/output/kanto/${kanto.output_name}.pmtiles" ./scripts/build_kanto_webp_pmtiles.sh
+    deps:
+      - ./scripts/build_kanto_webp_pmtiles.sh
+      - ./scripts/download_cog.sh
+      - ./scripts/mask_white_cog.sh
+      - ./scripts/cog_to_webp_pmtiles.sh
+    params:
+      - kanto.source_url
+      - kanto.white_threshold
+      - kanto.compression
+      - kanto.webp_quality
+      - kanto.tile_size
+      - kanto.output_name
+    outs:
+      - data/output/kanto/${kanto.output_name}.pmtiles:
+          cache: false
+
+  publish_kanto_pmtiles:
+    cmd: ./scripts/upload_pmtiles_to_r2.sh data/output/kanto/${kanto.output_name}.pmtiles ${kanto.publish_key}
+    deps:
+      - ./scripts/upload_pmtiles_to_r2.sh
+      - data/output/kanto/${kanto.output_name}.pmtiles
+    params:
+      - kanto.output_name
+      - kanto.publish_key
+    outs:
+      - remote://r2-final/${kanto.publish_key}:
+          cache: false
