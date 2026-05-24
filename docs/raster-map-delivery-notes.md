@@ -8,9 +8,9 @@
 
 ローカルにあった `data/tokyo5000.pmtiles` をプレビューしたところ、地図画像の外側や一部領域が白く表示された。原因と代替方式を調べた。
 
-## 現在のローカルファイル
+## 初期検証時のローカルファイル
 
-未追跡ファイルとして以下がある。
+初期検証時は、Git 管理外の作業ファイルとして以下があった。
 
 ```text
 data/tokyo5000.mbtiles   113M
@@ -127,7 +127,7 @@ outs:
 - `.dvc/cache` は小さく保てるが、ローカル確認用の最終 PMTiles は `data/output/kanto/` に残る
 - 別アプリケーションは DVC の hash object ではなく、固定 key の PMTiles を読む
 
-このリポジトリでは、配信 URL の安定性とローカル/R2 容量の削減を優先して、この外部 output + `cache: false` の構成にしている。
+このリポジトリでは、配信 URL の安定性とローカル/R2 容量の削減を優先して、この外部 output + `cache: false` の構成にしている。現在の実行手順は [DVC 関東 pipeline メモ](./dvc-kanto-pipeline.md) にまとめている。
 
 ## COG という選択肢
 
@@ -450,7 +450,7 @@ env npm_config_cache=/private/tmp/npm-cache-cog npx --yes http-server . -p 4174 
 
 実行計画は別ファイルに整理した。
 
-- [古地図 COG から WebP PMTiles を作る実行プラン](./cog-to-webp-pmtiles-plan.md)
+- [DVC 関東 pipeline メモ](./dvc-kanto-pipeline.md)
 
 ### A. COG 直接表示
 

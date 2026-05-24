@@ -1,147 +1,114 @@
 # pmtiles-on-r2
 
-迅速測図（農研機構「歴史的農業環境閲覧システム由来データ」など）の MBTiles を Cloudflare R2 に載せ、MapLibre で参照するまでの手順メモです。
+迅速測図の COG から白抜き WebP PMTiles を生成し、Cloudflare R2 の固定 object key に公開するための作業リポジトリです。
 
-## セットアップ概要
-1. `kanto` 向け DVC pipeline で、元 COG から白抜き WebP PMTiles を生成
-2. 必要に応じて固定キーの R2 object として公開
-3. `viewer/index.html` で生成 PMTiles と元 COG を確認
+DVC は巨大な中間ファイルを cache する用途ではなく、COG 取得、白抜き、PMTiles 生成、R2 公開の pipeline と lock file を管理するために使います。
+
+## 現在の構成
+
+| 種類 | 場所 | 役割 |
+| --- | --- | --- |
+| DVC pipeline | `dvc.yaml` | 関東迅速測図 PMTiles の生成と公開 |
+| パラメータ | `params.yaml` | 元 COG URL、白抜き閾値、WebP quality、R2 key |
+| スクリプト | `scripts/` | download、白抜き、PMTiles 生成、R2 upload |
+| Viewer | `viewer/` | 生成済み PMTiles と元 COG の表示確認 |
+| 背景メモ | `docs/` | 設計判断と調査メモ |
+
+`data/` は生成物置き場で、Git には入れません。
+
+## DVC pipeline
+
+定義されている stage は 2 つです。
+
+| stage | 内容 | output |
+| --- | --- | --- |
+| `build_kanto_webp_pmtiles` | COG を一時領域へ download し、白を alpha 化して WebP PMTiles を作る | `data/output/kanto/${kanto.output_name}.pmtiles` |
+| `publish_kanto_pmtiles` | 生成 PMTiles を R2 の固定 key に upload する | `remote://r2-final/${kanto.publish_key}` |
+
+raw COG と白抜き済み COG は `/private/tmp` に作る一時ファイルです。DVC output には入れません。
+
+最終 PMTiles と R2 外部 output はどちらも `cache: false` です。巨大ファイルを `.dvc/cache` に二重保存せず、`dvc.lock` で入力、params、checksum、size を記録します。
+
+## セットアップ
+
+必要なもの:
+
+- `uv`
+- `curl`
+- GDAL CLI
+- AWS CLI
+- `npx` で実行できる `pmtiles`
+
+R2 / DVC remote の設定:
+
+```bash
+cp .env.example .env
+# .env に DVC_R2_BUCKET、DVC_R2_ENDPOINT、AWS_ACCESS_KEY_ID、AWS_SECRET_ACCESS_KEY を入れる
+
+./scripts/configure_dvc_r2_remote.sh
+```
+
+`.env` と `.dvc/config.local` は Git 管理外です。
 
 ## 使い方
-### 1. 依存関係
-* bash / curl
-* [pmtiles CLI](https://github.com/protomaps/go-pmtiles)（`scripts/convert_and_upload.sh` 内で `npx -y pmtiles@latest` を自動実行）
-* AWS CLI（R2 は S3 互換のため）
 
-### 2. 変換 & アップロード
-環境変数を設定してスクリプトを実行します。
-
-```bash
-export MBTILES_URL="https://boiledorange73.sakura.ne.jp/rika/habs/tokyo5000.mbtiles" # 好きな MBTiles
-export R2_ENDPOINT="https://<accountid>.r2.cloudflarestorage.com" # R2 エンドポイント
-export R2_BUCKET="my-habs"                           # バケット名
-export R2_KEY="tokyo5000.pmtiles"                    # 保存するキー（省略可）
-export AWS_ACCESS_KEY_ID=...
-export AWS_SECRET_ACCESS_KEY=...
-
-./scripts/convert_and_upload.sh
-```
-
-成功すると、末尾に公開 URL が表示されます。バケットポリシーで public-read を許可していない場合は、署名付き URL を生成して MapLibre に渡してください。
-
-#### 4326 版が必要な場合
-MapLibre で使うだけなら 3857/900913 の MBTiles を選ぶのが安全です。4326 版（例: `tokyo5000-4326.jpg.mbtiles`）を使う場合は、変換後も CRS が 4326 になるので、`viewer/index.html` の背景地図と位置合わせがズレることがあります。必要に応じて背景地図を外すか、Style を 4326 に変更してください。
-
-### 3. 関東 PMTiles Viewer で確認（ローカル）
-関東成果物の確認用 Viewer が `viewer/index.html` にあります。生成済みの `data/output/kanto/kanto-rapid-webp-q90.pmtiles` を初期表示し、必要なときだけ元 COG と切り替えて比較できます。
-
-```bash
-env npm_config_cache=/private/tmp/npm-cache-cog npx --yes http-server . -p 4174 -c-1
-```
-
-ブラウザで `http://127.0.0.1:4174/viewer/` を開くと、関東 PMTiles を背景地図またはチェッカーボード上で確認できます。表示対象を `元COG` に切り替えると、`params.yaml` の `kanto.source_url` と同じ COG を直接読み込みます。
-
-Viewer 共通の見た目と PMTiles 読み込み処理は `viewer/assets/` にまとめています。Viewer 内の URL 定義は静的な定数なので、`params.yaml` の出力名や COG URL を変えた場合は `viewer/index.html` も更新してください。
-
-### 4. COG から WebP PMTiles を作る
-白マスク済み COG から、透明を保持した WebP PMTiles を作れます。`rio-pmtiles` がない環境では、GDAL の MBTiles WebP 出力を作ってから `pmtiles convert` で PMTiles 化します。
-
-```bash
-./scripts/cog_to_webp_pmtiles.sh \
-  data/tokyo5000-white-mask-250-deflate.cog.tif \
-  data/output/tokyo5000-webp-q90.pmtiles
-```
-
-今回の東京5000検証では、`data/output/tokyo5000-webp-q90.pmtiles` が生成されます。MapLibre 側では `tileSize: 512` を指定してください。
-
-### 5. DVC で kanto パイプラインを管理する
-`kanto` 向けのパイプラインは DVC で管理します。DVC 自体はローカル常設インストールせず、`uv run --with "dvc[s3]" dvc ...` で実行できます。
-
-白抜き処理は `tokyo5000-white-mask-250-deflate.cog.tif` と同じ方式で、`RGB >= 250` の画素だけ alpha 0 にします。`nearblack` ではなく、RGB値を維持したまま 4 バンド目の alpha だけ差し替えます。
-
-パイプライン:
-
-1. `build_kanto_webp_pmtiles`
-
-この stage の中で COG のダウンロード、`RGB >= 250` の alpha 化、WebP PMTiles 生成までを行います。raw COG と白抜き COG は `/private/tmp` に作る一時ファイルで、DVC の `outs` には入れません。DVC が管理するのは最終 PMTiles だけです。
-
-定義ファイル:
-
-* [dvc.yaml](/Users/kh03/work/repos/pmtiles-on-r2/dvc.yaml)
-* [params.yaml](/Users/kh03/work/repos/pmtiles-on-r2/params.yaml)
-
-実行例:
+PMTiles を生成:
 
 ```bash
 uv run --with "dvc[s3]" dvc repro build_kanto_webp_pmtiles
 ```
 
-一括実行:
-
-```bash
-uv run --with "dvc[s3]" dvc repro
-```
-
-容量要件:
-
-`kanto` COG は配布元で 17.7 GB あります。raw COG と白抜き COG は一時ファイルとして作るので、実行前に少なくとも 50 GB 以上の空き容量を見ておく方が安全です。処理完了後、一時ファイルは削除されます。
-
-R2 と DVC cache は最終生成物だけを管理します。中間成果物は DVC 管理対象にしません。
-
-#### WebP quality の意味
-
-`params.yaml` の `kanto.webp_quality` は GDAL の WebP タイル生成時に `QUALITY` として渡す値です。範囲は 1-100 で、値を上げるほど画質は上がり、ファイルサイズも大きくなります。
-
-現在の `90` は、古地図の細線・文字の可読性を優先した高めの設定です。容量を下げたい場合は `85` や `80` の比較版を生成し、文字の読みやすさとサイズを見て判断します。古地図は細い線や注記が多いため、単純に品質を下げると見た目以上に可読性が落ちることがあります。
-
-#### DVC remote と配信用 R2 object
-
-`dvc push` で R2 に送られるオブジェクトは DVC cache 用なので、R2 上のキー名は content hash になります。これは DVC の正常な挙動ですが、別アプリケーションから直接参照する PMTiles URL には向きません。
-
-別アプリケーションから読む場合は、配信用の固定キーへアップロードします。このリポジトリでは `publish_kanto_pmtiles` stage が `pmtiles/kanto-rapid-webp-q90.pmtiles` にアップロードし、その R2 object を DVC の外部 output として記録します。
+R2 の固定 key へ公開:
 
 ```bash
 uv run --with "dvc[s3]" dvc repro publish_kanto_pmtiles
 ```
 
-この stage の外部 output は `cache: false` です。R2 上の object 名は固定され、`.dvc/cache` に巨大な二重コピーを作りません。それでも `dvc.lock` には checksum や size が残るため、Git 上では「どの入力・パラメータから、どの固定キーの生成物を作ったか」をバージョン管理できます。
-
-この設計にした背景は [古地図ラスター配信方式の調査メモ](/Users/kh03/work/repos/pmtiles-on-r2/docs/raster-map-delivery-notes.md) の「DVC と R2 配信用 object の扱い」に残しています。
-
-R2 リモート設定:
+生成から公開まで一括実行:
 
 ```bash
-cp .env.example .env
-# .env に値を入れる
-# 手動で読み込むなら `source .env`
-
-./scripts/configure_dvc_r2_remote.sh
+uv run --with "dvc[s3]" dvc repro
 ```
 
-`.env` は `.gitignore` に入っているので、Secret は Git に乗りません。`configure_dvc_r2_remote.sh` は実行時に `.env` を自動で読み込みます。
+DVC cache remote へ送る `dvc push` は、配信用の固定名 PMTiles を公開する操作ではありません。配信用 object は `publish_kanto_pmtiles` stage で管理します。
 
-`dvc push` は DVC cache を remote に送るためのコマンドなので、配信用の固定名 PMTiles には使いません。固定名で配信する PMTiles は `publish_kanto_pmtiles` stage で管理します。
+## パラメータ変更
 
-viewer で透明化を確認する:
+`params.yaml` の `kanto` を変更してから `dvc repro` します。
+
+| key | 意味 |
+| --- | --- |
+| `source_url` | 元 COG URL |
+| `white_threshold` | `RGB >= threshold` の画素を透明化する閾値 |
+| `compression` | 白抜き COG の一時ファイル圧縮方式 |
+| `webp_quality` | GDAL WebP tile の `QUALITY` |
+| `tile_size` | PMTiles の tile size |
+| `output_name` | ローカル PMTiles の basename |
+| `publish_key` | R2 に公開する固定 object key |
+
+`output_name` や `source_url` を変えた場合、Viewer の静的 URL 定義も必要に応じて更新してください。
+
+## Viewer
+
+ローカル確認:
 
 ```bash
 env npm_config_cache=/private/tmp/npm-cache-cog npx --yes http-server . -p 4174 -c-1
 ```
 
-`http://127.0.0.1:4174/viewer/` を開くと、生成した `data/output/kanto/kanto-rapid-webp-q90.pmtiles` を背景地図またはチェッカーボード上で確認できます。白い余白が残っていれば、背景が隠れて見えます。
+`http://127.0.0.1:4174/viewer/` を開くと、生成 PMTiles と元 COG を切り替えて確認できます。白い余白が透明化されていれば、背景地図またはチェッカーボードが見えます。
 
-## R2 側の設定ポイント
-* バケットは public-read にするか、必要なとき署名付き URL を発行する
-* CORS を設定し、`GET`/`HEAD` を許可（`*` かドメインを指定）
-* R2 Custom Domain を設定すると URL を短くでき、HTTPS で配信しやすくなります
+## 容量要件
 
-## よくある詰まりどころ
-* **MBTiles の座標系が違う**: 3857/900913 版を使う。4326 版を使うなら MapLibre 側も 4326 スタイルにする。
-* **R2 で 403/AccessDenied**: 権限（public-read または署名付き URL）、CORS 設定、キー名の打ち間違いを確認。
-* **タイルが真っ黒に見える**: JPEG タイルの場合、背景が黒になることがある。PNG 版を試すか、描画のブレンド設定を確認。
-* **ズームが合わない**: 付属のビューワーは PMTiles ヘッダーの bbox を優先。範囲が広すぎると初期ズームが粗くなるので、必要に応じて `fitBounds` の padding / maxZoom を調整。
+`kanto.source_url` の COG は大きいため、処理中に raw COG、白抜き COG、最終 PMTiles の領域が必要です。少なくとも 50 GB 以上の空き容量を見ておく方が安全です。一時ファイルは処理終了後に削除されます。
+
+## docs
+
+- [DVC 関東 pipeline メモ](/Users/kh03/work/repos/pmtiles-on-r2/docs/dvc-kanto-pipeline.md)
+- [古地図ラスター配信方式の調査メモ](/Users/kh03/work/repos/pmtiles-on-r2/docs/raster-map-delivery-notes.md)
 
 ## 参考リンク
-* データ配布: https://boiledorange73.sakura.ne.jp/data.html
-* PMTiles 仕様: https://github.com/protomaps/PMTiles
-* MapLibre GL JS: https://maplibre.org/
+
+- データ配布: https://boiledorange73.sakura.ne.jp/data.html
+- PMTiles 仕様: https://github.com/protomaps/PMTiles
+- MapLibre GL JS: https://maplibre.org/
